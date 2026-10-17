@@ -1,0 +1,86 @@
+name: build-qemu
+
+# Put this file at .github/workflows/build-qemu.yml in a repo that also
+# contains senses-qemu-sources-0_1_960_tar.gz at its root.
+# Run it from the Actions tab: "build-qemu" -> "Run workflow".
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "QEMU guest target"
+        type: choice
+        options: [aarch64, arm]
+        default: aarch64
+      lto:
+        description: "LTO (0 = faster build for testing, 1 = faster binary)"
+        type: choice
+        options: ["0", "1"]
+        default: "0"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack source
+        run: |
+          tar xzf senses-qemu-sources*.gz
+          ls gpl-source gpl-source/qemu
+
+      - name: Add TARGET (arm | aarch64) support to the build script
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("gpl-source/qemu/build-android.sh")
+          s = p.read_text()
+
+          def rep(old, new, exact=None):
+              global s
+              n = s.count(old)
+              assert n >= 1 and (exact is None or n == exact), f"{old!r}: found {n}x"
+              s = s.replace(old, new)
+
+          # binary / ninja target names follow TARGET (qemu-arm -> qemu-$TARGET)
+          rep("qemu-arm", "qemu-$TARGET")
+          rep("--target-list=arm-linux-user", "--target-list=${TARGET}-linux-user", 1)
+          # TARGET is validated at the top and handed to the chroot script
+          rep("set -euo pipefail\n",
+              'set -euo pipefail\n'
+              'TARGET="${TARGET:-arm}"\n'
+              'case "$TARGET" in arm|aarch64) ;; *) echo "TARGET must be arm or aarch64"; exit 1;; esac\n', 1)
+          rep("BR=$BR\nINNER\n", "BR=$BR\nTARGET=$TARGET\nINNER\n", 1)
+          p.write_text(s)
+          PY
+          bash -n gpl-source/qemu/build-android.sh
+          grep -n 'TARGET' gpl-source/qemu/build-android.sh | head -30
+
+      - name: Build QEMU in the Alpine chroot
+        shell: bash
+        run: |
+          sudo env "TARGET=${{ inputs.target }}" "LTO=${{ inputs.lto }}" \
+            bash gpl-source/qemu/build-android.sh 2>&1 | tee build.log
+
+      - name: Smoke test (aarch64 only, informational)
+        if: ${{ inputs.target == 'aarch64' }}
+        continue-on-error: true
+        run: |
+          printf '#include <stdio.h>\nint main(void){puts("hello from aarch64 guest");return 0;}\n' > hello.c
+          gcc -static -O2 hello.c -o hello-aarch64
+          file hello-aarch64
+          gpl-source/qemu/build/qemu-aarch64-android ./hello-aarch64
+
+      - name: Summary (last lines of the log)
+        if: always()
+        run: |
+          { echo '### build.log (last 60 lines)'; echo '```'; tail -60 build.log 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qemu-${{ inputs.target }}
+          path: |
+            gpl-source/qemu/build/
+            build.log
