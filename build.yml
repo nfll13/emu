@@ -12,7 +12,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      # Android SDK sudah terpasang di runner ubuntu-latest, cukup terima lisensi.
       - name: Accept Android licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - uses: gradle/actions/setup-gradle@v4
