@@ -9,10 +9,9 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: 8.14.3 }
-      - run: unzip -q QEMUX-android.zip
-      - run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
-      - run: cd qemux && gradle assembleDebug
-      - uses: actions/upload-artifact@v4
-        with:
-          name: QEMUX-debug
-          path: qemux/app/build/outputs/apk/debug/*.apk
+      - name: Siapkan project
+        run: |
+          ls -la
+          Z=$(find . -maxdepth 2 -iname "*.zip" | head -1)
+          if [ -n "$Z" ]; then unzip -q -o "$Z"; fi
+          D=$(dirname "$(find . -name setti
